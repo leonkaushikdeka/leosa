@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ransomware-protection-api
+  namespace: ransomware-protection
+  labels:
+    app.kubernetes.io/name: ransomware-protection-api
+    app.kubernetes.io/component: api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ransomware-protection-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ransomware-protection-api
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: ransomware-protection
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: api
+          image: ransomware-protection/api:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 9090
+              name: metrics
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ransomware-protection-secrets
+                  key: postgres-password
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ransomware-protection-secrets
+                  key: redis-password
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ransomware-protection-secrets
+                  key: jwt-secret-key
+          envFrom:
+            - configMapRef:
+                name: ransomware-protection-config
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ransomware-protection-frontend
+  namespace: ransomware-protection
+  labels:
+    app.kubernetes.io/name: ransomware-protection-frontend
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ransomware-protection-frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ransomware-protection-frontend
+        app.kubernetes.io/component: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ransomware-protection/frontend:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10

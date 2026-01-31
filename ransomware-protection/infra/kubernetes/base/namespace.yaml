@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ransomware-protection
+  labels:
+    app.kubernetes.io/name: ransomware-protection
+    app.kubernetes.io/instance: ransomware-protection
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: infrastructure

@@ -1,5 +1,5 @@
 """
-ForensicSight v2.0 - Real-time Forensic Analysis System
+ForensicSight v2.0 - Real-time Forensic Analysis System (Improved Detection)
 """
 
 import cv2
@@ -30,41 +30,48 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class EvidenceType(Enum):
-    pass
-
-
 class ForensicConfig:
     WIDTH = 1280
     HEIGHT = 720
     FPS_TARGET = 30
+    CONF_THRESHOLD = 0.25
 
-    PRIMARY = {
-        "sports ball",
-        "bottle",
-        "cell phone",
-        "knife",
-        "scissors",
-        "clock",
-        "vase",
-    }
-    ZONES = {
-        "bed",
-        "couch",
-        "chair",
-        "dining table",
-        "refrigerator",
-        "oven",
-        "suitcase",
-        "microwave",
-    }
-    ANOMALIES = {"handbag", "backpack", "suitcase", "box", "book", "laptop"}
+    WEAPONS = {"knife", "scissors", "gun", "firearm", "knife set", "dagger"}
+    BIOLOGICAL = {"person", "face", "blood"}
+    ELECTRONICS = {"cell phone", "laptop", "computer", "phone", "mobile"}
+    CONTAINERS = {"suitcase", "backpack", "handbag", "bag", "box", "trunk"}
+    FURNITURE = {"bed", "couch", "chair", "table", "dining table", "desk", "bench"}
+    KITCHEN = {"refrigerator", "oven", "microwave", "sink", "stove", "toaster"}
+    DOCUMENTS = {"book", "paper", "newspaper", "document", "letter"}
+    CLOTHING = {"tie", "shirt", "pants", "jacket", "coat", "dress", "shoe"}
+    TOOLS = {"scissors", "knife", "screwdriver", "hammer", "wrench", "drill"}
+    VALUABLES = {"watch", "ring", "jewelry", "necklace", "earring", "bracelet"}
+    TRAFFIC = {"car", "truck", "vehicle", "bicycle", "motorcycle", "bus"}
 
-    COLOR_PRIMARY = (0, 0, 255)
-    COLOR_ZONE = (255, 0, 0)
-    COLOR_ANOMALY = (0, 255, 255)
+    ALL_CATEGORIES = (
+        WEAPONS
+        | BIOLOGICAL
+        | ELECTRONICS
+        | CONTAINERS
+        | FURNITURE
+        | KITCHEN
+        | DOCUMENTS
+        | CLOTHING
+        | TOOLS
+        | VALUABLES
+        | TRAFFIC
+    )
+
+    COLOR_WEAPON = (0, 0, 255)
+    COLOR_BIOLOGICAL = (0, 0, 200)
+    COLOR_ELECTRONIC = (0, 255, 255)
+    COLOR_CONTAINER = (255, 165, 0)
+    COLOR_FURNITURE = (255, 0, 0)
+    COLOR_TOOL = (0, 255, 0)
+    COLOR_OTHER = (128, 128, 128)
+
     GRID_SIZE = 50
-    DUPLICATE_COOLDOWN = 2.0
+    DUPLICATE_COOLDOWN = 1.0
 
 
 @dataclass
@@ -91,8 +98,12 @@ class BloodstainPatternAnalysis:
 
     def detect_blood(self, image: np.ndarray) -> np.ndarray:
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        mask1 = cv2.inRange(hsv, np.array([0, 100, 50]), np.array([10, 255, 255]))
-        mask2 = cv2.inRange(hsv, np.array([160, 100, 50]), np.array([180, 255, 255]))
+        lower_red1 = np.array([0, 100, 50])
+        upper_red1 = np.array([10, 255, 255])
+        lower_red2 = np.array([160, 100, 50])
+        upper_red2 = np.array([180, 255, 255])
+        mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+        mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
         mask = cv2.bitwise_or(mask1, mask2)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel)
@@ -101,134 +112,174 @@ class BloodstainPatternAnalysis:
     def analyze_pattern(self, mask: np.ndarray, image_area: int) -> Dict[str, Any]:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         total_stains = len(contours)
-        blood_ratio = total_stains / (image_area / 10000)
+        blood_ratio = total_stains / (image_area / 10000) if image_area > 0 else 0
+
+        patterns = {"drip": 0, "spatter": 0, "pool": 0, "transfer": 0}
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            perimeter = cv2.arcLength(cnt, True)
+            if perimeter > 0:
+                circularity = 4 * np.pi * area / (perimeter * perimeter)
+                if area > 500:
+                    patterns["pool"] += 1
+                elif circularity > 0.7:
+                    patterns["drip"] += 1
+                elif area < 50:
+                    patterns["spatter"] += 1
+                else:
+                    patterns["transfer"] += 1
+
+        dominant = max(patterns, key=patterns.get) if patterns else "none"
+
         return {
-            "total_stain_count": total_stains,
+            "total_stains": total_stains,
             "blood_ratio": blood_ratio,
-            "automatic_log_required": blood_ratio > 10,
+            "dominant_pattern": dominant,
+            "patterns": patterns,
+            "requires_forensic": blood_ratio > 5 or total_stains > 10,
         }
 
 
 class GunshotResidueDetector:
-    def detect_stippling(self, roi: np.ndarray) -> Dict[str, Any]:
+    def detect_gsr(self, roi: np.ndarray) -> Dict[str, Any]:
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
         _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        gsr_particles = []
         contours, _ = cv2.findContours(
             thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if 5 <= area <= 100:
+                perimeter = cv2.arcLength(cnt, True)
+                if perimeter > 0:
+                    circularity = 4 * np.pi * area / (perimeter * perimeter)
+                    if circularity > 0.5:
+                        gsr_particles.append(cnt)
 
-        particles = []
-        for c in contours:
-            area = cv2.contourArea(c)
-            if 10 <= area <= 100:
-                per = cv2.arcLength(c, True)
-                if per > 0 and (4 * np.pi * area / (per * per)) > 0.7:
-                    particles.append(c)
+        count = len(gsr_particles)
+        density = count / max(1, roi.shape[0] * roi.shape[1] / 1000)
 
-        count = len(particles)
+        if count > 100:
+            distance = "Contact-6 inches"
+        elif count > 50:
+            distance = "6-12 inches"
+        elif count > 20:
+            distance = "12-24 inches"
+        else:
+            distance = ">24 inches"
+
         return {
-            "gsr_particle_count": count,
-            "estimated_distance": 'contact-6"'
-            if count > 100
-            else '6-12"'
-            if count > 50
-            else '12-24"'
-            if count > 20
-            else '>24"',
+            "gsr_particles": count,
+            "density": density,
+            "estimated_distance": distance,
+            "is_gsr_present": count > 10,
             "contamination_risk": count > 50,
         }
 
 
-class LatentFingerprintEnhancer:
-    def __init__(self):
-        self.clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-        self.gabor_angles = [0, 45, 90, 135]
-
-    def create_gabor_kernels(self) -> List[np.ndarray]:
-        kernels = []
-        for angle in self.gabor_angles:
-            kernel = cv2.getGaborKernel(
-                (31, 31), 5.0, np.radians(angle), 10.0, 0.5, 0, cv2.CV_32F
-            )
-            kernels.append(kernel)
-        return kernels
-
+class FingerprintDetector:
     def enhance_fingerprint(self, roi: np.ndarray) -> Dict[str, Any]:
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        clahe_enhanced = self.clahe.apply(gray)
-        kernels = self.create_gabor_kernels()
-        gabor_combined = np.zeros_like(gray, dtype=np.float32)
-        for kernel in kernels:
-            filtered = cv2.filter2D(clahe_enhanced, -1, kernel)
-            gabor_combined = np.maximum(gabor_combined, filtered)
-        gabor_uint8 = np.uint8(255 * gabor_combined / max(1, np.max(gabor_combined)))
-        _, binary = cv2.threshold(
-            gabor_uint8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-        )
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+
+        sobelx = cv2.Sobel(enhanced, cv2.CV_64F, 1, 0, ksize=3)
+        sobely = cv2.Sobel(enhanced, cv2.CV_64F, 0, 1, ksize=3)
+        magnitude = np.sqrt(sobelx**2 + sobely**2)
+        edges = np.uint8(255 * magnitude / max(1, np.max(magnitude)))
+
+        _, binary = cv2.threshold(edges, 30, 255, cv2.THRESH_BINARY)
         skeleton = morphology.skeletonize(binary > 127)
-        skeleton_uint8 = np.uint8(skeleton * 255)
-        ridges = measure.label(skeleton_uint8 > 0)
+
+        ridges = measure.label(skeleton)
         regions = measure.regionprops(ridges)
+
         minutiae = 0
         for region in regions:
             for coord in region.coords:
                 y, x = coord
-                nb = skeleton_uint8[max(0, y - 1) : y + 2, max(0, x - 1) : x + 2]
-                if np.sum(nb > 0) == 3 or np.sum(nb > 0) > 4:
+                nb = skeleton[
+                    max(0, y - 1) : min(y + 2, skeleton.shape[0]),
+                    max(0, x - 1) : min(x + 2, skeleton.shape[1]),
+                ]
+                pixels = np.sum(nb > 0)
+                if pixels == 3 or pixels > 4:
                     minutiae += 1
+
         return {
             "minutiae_count": minutiae,
-            "quality_score": min(1.0, np.std(clahe_enhanced) / 128.0),
-            "is_suitable": minutiae > 10,
+            "quality": np.std(enhanced) / 128,
+            "is_latent": minutiae > 5 and np.std(enhanced) > 30,
+            "requires_afis": minutiae > 15,
         }
 
 
 class ToolMarkAnalyzer:
-    def analyze_tool_mark(self, roi: np.ndarray) -> Dict[str, Any]:
+    def analyze_tool_marks(self, roi: np.ndarray) -> Dict[str, Any]:
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+
         sobelx = cv2.Sobel(blurred, cv2.CV_64F, 1, 0, ksize=3)
         sobely = cv2.Sobel(blurred, cv2.CV_64F, 0, 1, ksize=3)
         magnitude = np.sqrt(sobelx**2 + sobely**2)
+
         edges = np.uint8(255 * magnitude / max(1, np.max(magnitude)))
-        _, edges_binary = cv2.threshold(edges, 50, 255, cv2.THRESH_BINARY)
+        _, binary = cv2.threshold(edges, 40, 255, cv2.THRESH_BINARY)
+
         lines = cv2.HoughLinesP(
-            edges_binary, 1, np.pi / 180, threshold=50, minLineLength=30, maxLineGap=10
+            binary, 1, np.pi / 180, threshold=30, minLineLength=20, maxLineGap=5
         )
+
         angles = []
         if lines is not None:
             for line in lines:
                 x1, y1, x2, y2 = line[0]
-                angles.append(abs(np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi))
+                if x2 != x1:
+                    angle = abs(np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi)
+                    angles.append(angle)
+
         variance = np.std(angles) if len(angles) > 1 else 0
+
+        if variance < 30:
+            tool_type = "Screwdriver"
+        elif variance < 100:
+            tool_type = "Pliers/Wrench"
+        elif variance < 200:
+            tool_type = "Hammer"
+        else:
+            tool_type = "Unknown/Impact"
+
         return {
-            "tool_classification": "screwdriver"
-            if variance < 50
-            else "pliers/wrench"
-            if variance < 200
-            else "irregular",
-            "is_striation": variance < 100 and len(angles) > 10,
+            "tool_type": tool_type,
+            "striation_lines": len(angles),
+            "angle_variance": variance,
+            "is_tool_mark": len(angles) > 5,
         }
 
 
 class TraceEvidenceAnalyzer:
-    def __init__(self):
-        self.uv_range = ((130, 50, 0), (170, 255, 100))
-        self.blue_range = ((100, 50, 0), (140, 255, 255))
-
-    def detect_uv_fluorescence(self, roi: np.ndarray) -> Dict[str, Any]:
+    def analyze_trace(self, roi: np.ndarray) -> Dict[str, Any]:
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, np.array(self.uv_range[0]), np.array(self.uv_range[1]))
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        return {"uv_detected": len(contours) > 5, "particle_count": len(contours)}
 
-    def detect_blue_enhancement(self, roi: np.ndarray) -> Dict[str, Any]:
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(
-            hsv, np.array(self.blue_range[0]), np.array(self.blue_range[1])
-        )
-        return {"blue_applied": True, "intensity": np.sum(mask > 0)}
+        uv_mask = cv2.inRange(hsv, np.array([130, 50, 0]), np.array([170, 255, 100]))
+        blue_mask = cv2.inRange(hsv, np.array([100, 50, 0]), np.array([140, 255, 255]))
+
+        uv_count = np.sum(uv_mask > 0)
+        blue_count = np.sum(blue_mask > 0)
+
+        fiber_mask = cv2.inRange(hsv, np.array([0, 50, 100]), np.array([180, 150, 255]))
+        fiber_count = np.sum(fiber_mask > 0)
+
+        return {
+            "uv_fluorescent": uv_count > 50,
+            "blue_enhancement": blue_count > 100,
+            "fibers_detected": fiber_count > 20,
+            "fiber_count": fiber_count,
+            "particle_density": (uv_count + blue_count) / max(1, roi.size / 1000),
+        }
 
 
 class ForensicEvidenceManager:
@@ -254,13 +305,11 @@ class ForensicEvidenceManager:
         self.registered_evidence = []
         self._create_structure()
         self._init_csv()
-        self.csv_path = self.base_dir / "master_evidence_registry.csv"
 
     def _create_structure(self):
         self.base_dir.mkdir(parents=True, exist_ok=True)
         for d in self.structure_dirs:
             (self.base_dir / d).mkdir(exist_ok=True)
-        logger.info(f"Case dir: {self.base_dir}")
 
     def _init_csv(self):
         self.csv_path = self.base_dir / "master_evidence_registry.csv"
@@ -277,30 +326,16 @@ class ForensicEvidenceManager:
                 ]
             )
 
-    def _append_csv(self, ev: ForensicEvidence):
-        try:
-            with open(self.csv_path, "a", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(
-                    [
-                        ev.evidence_id,
-                        self.case_id,
-                        ev.timestamp_utc,
-                        ev.evidence_type,
-                        ev.subclassification,
-                        ev.collection_priority,
-                    ]
-                )
-        except Exception as e:
-            logger.error(f"CSV append error: {e}")
-
     def _gen_id(self, ev_type: str) -> str:
-        prefix = {
+        prefix_map = {
             "biological": "BIO",
             "trace": "TRC",
             "impression": "IMP",
             "ballistics": "BAL",
-        }.get(ev_type[:10], "GEN")
+            "weapon": "BAL",
+            "electronic": "PHY",
+        }
+        prefix = prefix_map.get(ev_type[:10].lower(), "GEN")
         self.evidence_counter[prefix] += 1
         return f"{self.case_id}-{prefix}-{self.evidence_counter[prefix]:03d}"
 
@@ -308,28 +343,12 @@ class ForensicEvidenceManager:
         _, enc = cv2.imencode(".png", img)
         return hashlib.sha256(enc.tobytes()).hexdigest()
 
-    def check_contamination(self, new_ev: ForensicEvidence) -> List[str]:
-        risks = []
-        if "gsr" in new_ev.evidence_type.lower():
-            for existing in self.registered_evidence:
-                if "biological" in existing.evidence_type.lower():
-                    nb = new_ev.location_bbox
-                    eb = existing.location_bbox
-                    nc = ((nb[0] + nb[2]) // 2, (nb[1] + nb[3]) // 2)
-                    ec = ((eb[0] + eb[2]) // 2, (eb[1] + eb[3]) // 2)
-                    dist = np.sqrt((nc[0] - ec[0]) ** 2 + (nc[1] - ec[1]) ** 2)
-                    if dist < 200:
-                        risks.append(
-                            f"PROXIMITY: {dist:.0f}px from {existing.evidence_id}"
-                        )
-        return risks
-
     def create_evidence(
         self,
         ev_type: str,
         subclass: str,
-        bbox: Tuple[int, int, int, int],
-        dims: Tuple[int, int],
+        bbox: Tuple,
+        dims: Tuple,
         img: np.ndarray,
         analysis: Dict,
         priority: int = 3,
@@ -347,92 +366,99 @@ class ForensicEvidenceManager:
             collection_priority=priority,
             contamination_risks=risks or [],
         )
-        all_risks = self.check_contamination(ev)
-        if all_risks:
-            ev.contamination_risks.extend(all_risks)
-
-        self._save_evidence_images(ev, img)
+        self._save_evidence(ev, img)
         self._append_csv(ev)
         self.registered_evidence.append(ev)
-        logger.info(f"EVIDENCE: {ev.evidence_id} - {ev.evidence_type}")
+        logger.info(
+            f"EVIDENCE: {ev.evidence_id} - {ev.evidence_type} | {ev.subclassification}"
+        )
         return ev
 
-    def _save_evidence_images(self, ev: ForensicEvidence, img: np.ndarray):
-        """Save macro and context images for evidence"""
+    def _save_evidence(self, ev: ForensicEvidence, img: np.ndarray):
         try:
             photo_dir = self.base_dir / "05_Crime_Scene_Photography"
             hash_short = ev.image_hash_sha256[:12]
-
             macro_path = photo_dir / f"{ev.evidence_id}_macro_{hash_short}.png"
             context_path = photo_dir / f"{ev.evidence_id}_context_{hash_short}.jpg"
-
             cv2.imwrite(str(macro_path), img)
 
             context_img = np.zeros(
                 (ForensicConfig.HEIGHT, ForensicConfig.WIDTH, 3), dtype=np.uint8
             )
-            context_img[:] = (20, 20, 20)
+            context_img[:] = (15, 15, 20)
             bx, by, bw, bh = ev.location_bbox
-            by2 = min(by + bh + 50, ForensicConfig.HEIGHT - 100)
-            bx2 = min(bx + bw + 50, ForensicConfig.WIDTH - 50)
-            context_img[by:by2, bx:bx2] = cv2.resize(img, (bx2 - bx, by2 - by))
+            by2 = min(by + bh + 80, ForensicConfig.HEIGHT - 80)
+            bx2 = min(bx + bw + 80, ForensicConfig.WIDTH - 30)
+            roi_resized = cv2.resize(img, (max(10, bx2 - bx), max(10, by2 - by)))
+            context_img[by:by2, bx:bx2] = roi_resized
             cv2.rectangle(context_img, (bx, by), (bx2, by2), (0, 255, 0), 2)
             cv2.putText(
                 context_img,
                 ev.evidence_id,
-                (bx, by - 10),
+                (bx, by - 15),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
+                0.6,
                 (0, 255, 0),
-                1,
+                2,
             )
             cv2.putText(
                 context_img,
                 f"Type: {ev.evidence_type}",
                 (bx, by2 + 20),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.4,
+                0.5,
                 (200, 200, 200),
                 1,
             )
-
+            cv2.putText(
+                context_img,
+                f"Priority: {ev.collection_priority}",
+                (bx, by2 + 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 200, 100),
+                1,
+            )
             cv2.imwrite(str(context_path), context_img)
-            logger.info(f"Saved: {macro_path.name}, {context_path.name}")
         except Exception as e:
-            logger.error(f"Error saving evidence images: {e}")
+            logger.error(f"Save error: {e}")
+
+    def _append_csv(self, ev: ForensicEvidence):
+        try:
+            with open(self.csv_path, "a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(
+                    [
+                        ev.evidence_id,
+                        self.case_id,
+                        ev.timestamp_utc,
+                        ev.evidence_type,
+                        ev.subclassification,
+                        ev.collection_priority,
+                    ]
+                )
+        except:
+            pass
 
 
 class ForensicSightSystem:
-    def __init__(self, case_id: str, model_size: str = "s"):
+    def __init__(self, case_id: str):
         self.case_id = case_id
-        self.model = YOLO(f"yolov8{model_size}.pt")
+        self.model = YOLO("yolov8s.pt")
         self.cap = None
         self.running = False
         self.fps = 0
         self.frame_count = 0
         self.last_time = time.time()
         self.demo_mode = False
-        self.demo_idx = 0
-
         self.evidence_manager = ForensicEvidenceManager(case_id)
         self.bpa = BloodstainPatternAnalysis()
         self.gsr = GunshotResidueDetector()
-        self.fp = LatentFingerprintEnhancer()
+        self.fingerprint = FingerprintDetector()
         self.tool = ToolMarkAnalyzer()
         self.trace = TraceEvidenceAnalyzer()
-
         self.tracked = {}
         self.logged = set()
-
-        self.zone_prompts = {
-            "bed": "ZONE: Under Mattress | COLLECT: Bedding DNA",
-            "couch": "ZONE: Between Cushions | LIFT: Frame weapons",
-            "chair": "ZONE: Seat & Legs | EXAMINE: Upholstery",
-            "refrigerator": "ZONE: Door & Contents | EXAMINE: Contamination",
-            "oven": "ZONE: Interior | COLLECT: Residue samples",
-            "suitcase": "ZONE: Hidden compartments | SEARCH: Drugs",
-        }
-
         logger.info(f"ForensicSight v2.0 initialized: {case_id}")
 
     def init_camera(self) -> bool:
@@ -440,32 +466,30 @@ class ForensicSightSystem:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, ForensicConfig.WIDTH)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, ForensicConfig.HEIGHT)
         self.cap.set(cv2.CAP_PROP_FPS, ForensicConfig.FPS_TARGET)
-
         if not self.cap.isOpened():
-            logger.warning("Camera not available - using DEMO mode")
+            logger.warning("Camera not available - demo mode")
             self.demo_mode = True
-            return True
         return True
 
-    def gen_demo_frame(self) -> Tuple[np.ndarray, Any]:
+    def gen_demo_frame(self):
         frame = np.random.randint(
-            0, 50, (ForensicConfig.HEIGHT, ForensicConfig.WIDTH, 3), dtype=np.uint8
+            0, 40, (ForensicConfig.HEIGHT, ForensicConfig.WIDTH, 3), dtype=np.uint8
         )
-        frame[200:520, 400:880] = [30, 30, 40]
+        frame[100:400, 300:700] = (30, 30, 45)
         cv2.putText(
             frame,
-            "DEMO MODE - NO CAMERA",
-            (450, 360),
+            "DEMO MODE - ForensicSight v2.0",
+            (380, 350),
             cv2.FONT_HERSHEY_SIMPLEX,
             1.2,
-            (100, 100, 150),
+            (100, 120, 150),
             2,
         )
 
         demo_objs = [
-            {"bbox": [350, 200, 550, 400], "cls": 41, "conf": 0.85},  # suitcase
-            {"bbox": [700, 100, 950, 350], "cls": 59, "conf": 0.90},  # bed
-            {"bbox": [100, 400, 300, 600], "cls": 0, "conf": 0.75},  # person
+            {"bbox": [350, 180, 500, 350], "cls": 41, "conf": 0.85},
+            {"bbox": [700, 80, 950, 320], "cls": 59, "conf": 0.92},
+            {"bbox": [80, 380, 280, 580], "cls": 0, "conf": 0.75},
         ]
 
         class MockBoxes:
@@ -485,18 +509,17 @@ class ForensicSightSystem:
 
         return frame, MockResults(torch.tensor(boxes))
 
-    def process(self, frame: np.ndarray, box) -> None:
+    def process_detection(self, frame, box):
         bbox = [int(box[0]), int(box[1]), int(box[2]), int(box[3])]
         cls_id = int(box[5])
         conf = float(box[4])
-        name = self.model.names[cls_id]
+        name = self.model.names[cls_id] if cls_id < len(self.model.names) else "unknown"
 
         grid = (
             bbox[0] // ForensicConfig.GRID_SIZE,
             bbox[1] // ForensicConfig.GRID_SIZE,
         )
         now = time.time()
-
         if (
             grid in self.tracked
             and now - self.tracked[grid] < ForensicConfig.DUPLICATE_COOLDOWN
@@ -510,71 +533,100 @@ class ForensicSightSystem:
 
         ev_type = "contextual"
         subclass = name
-        priority = 1
+        priority = 3
         analysis = {}
         risks = []
 
-        if name in ForensicConfig.PRIMARY:
-            ev_type = "contextual"
-            subclass = name
-            priority = 3
-            analysis = {"class": name, "type": "primary"}
+        name_lower = name.lower()
 
-        elif name in ForensicConfig.ZONES:
-            ev_type = "contextual"
-            subclass = f"ZONE: {name}"
-            analysis = {"class": name, "type": "zone"}
+        if name_lower in ForensicConfig.WEAPONS or any(
+            w in name_lower for w in ["knife", "gun", "scissor", "weapon"]
+        ):
+            ev_type = "weapon"
+            subclass = f"WEAPON: {name}"
+            priority = 5
+            analysis = {"weapon_type": name, "threat_level": "HIGH"}
+            risks.append("Handle with extreme caution")
 
+        elif (
+            name_lower in ForensicConfig.BIOLOGICAL
+            or "blood" in name_lower
+            or "face" in name_lower
+        ):
+            ev_type = "biological_blood"
+            subclass = f"BIOLOGICAL: {name}"
+            priority = 5
             bpa = self.bpa.analyze_pattern(self.bpa.detect_blood(roi), roi.size)
-            if bpa["automatic_log_required"]:
-                ev_type = "biological_blood"
-                subclass = f"BLOOD in {name}"
-                priority = 5
-                analysis.update(bpa)
-                risks.append("Biological hazard")
+            analysis = {"biological": name, "bpa": bpa}
+            risks.append("Biohazard - use PPE")
 
-            gsr = self.gsr.detect_stippling(roi)
-            if gsr["contamination_risk"]:
-                analysis["gsr_warning"] = gsr["estimated_distance"]
-
-        elif name in ForensicConfig.ANOMALIES:
-            ev_type = "trace"
-            subclass = f"ANOMALY: {name}"
+        elif name_lower in ForensicConfig.ELECTRONICS or any(
+            e in name_lower for e in ["phone", "laptop", "computer", "mobile"]
+        ):
+            ev_type = "electronic"
+            subclass = f"ELECTRONIC: {name}"
             priority = 4
-            uv = self.trace.detect_uv_fluorescence(roi)
-            analysis = {"class": name, "type": "anomaly", "uv": uv}
+            analysis = {"electronic": name, "digital_forensics": True}
 
-            fp = self.fp.enhance_fingerprint(roi)
-            if fp["is_suitable"]:
-                ev_type = "trace_fingerprint"
-                subclass = f"FINGERPRINT on {name}"
+        elif name_lower in ForensicConfig.CONTAINERS or any(
+            c in name_lower for c in ["bag", "box", "suitcase", "backpack", "container"]
+        ):
+            ev_type = "trace_evidence"
+            subclass = f"CONTAINER: {name}"
+            priority = 4
+            trace = self.trace.analyze_trace(roi)
+            fp = self.fingerprint.enhance_fingerprint(roi)
+            analysis = {"container": name, "trace": trace, "fingerprint": fp}
+            if fp["is_latent"]:
+                analysis["latent_print"] = True
                 priority = 5
-                analysis.update(fp)
 
-        if name in ForensicConfig.PRIMARY:
+        elif (
+            name_lower in ForensicConfig.FURNITURE
+            or name_lower in ForensicConfig.KITCHEN
+        ):
+            ev_type = "search_zone"
+            subclass = f"SEARCH ZONE: {name}"
+            priority = 2
             bpa = self.bpa.analyze_pattern(self.bpa.detect_blood(roi), roi.size)
-            if bpa["automatic_log_required"]:
-                ev_type = "biological_blood"
-                subclass = f"BLOOD on {name}"
-                priority = 5
-                analysis.update(bpa)
-                risks.append("Biological hazard")
+            gsr = self.gsr.detect_gsr(roi)
+            analysis = {"zone": name, "blood_check": bpa, "gsr_check": gsr}
+            if bpa["requires_forensic"]:
+                analysis["blood_detected"] = True
+                risks.append("Possible biological evidence")
+            if gsr["is_gsr_present"]:
+                analysis["gsr_detected"] = True
+                risks.append("GSR contamination")
 
-            gsr = self.gsr.detect_stippling(roi)
-            if gsr["gsr_particle_count"] > 0:
-                analysis["gsr"] = gsr
-                if gsr["contamination_risk"]:
-                    ev_type = "trace_gunshot_residue"
-                    subclass = f"GSR on {name}"
-                    priority = 5
-                    risks.append("GSR contamination")
+        elif name_lower in ForensicConfig.TOOLS or any(
+            t in name_lower for t in ["knife", "scissor", "screwdriver", "hammer"]
+        ):
+            ev_type = "impression_tool_mark"
+            subclass = f"TOOL: {name}"
+            priority = 4
+            tool_analysis = self.tool.analyze_tool_marks(roi)
+            analysis = {"tool": name, "tool_analysis": tool_analysis}
 
-            tool = self.tool.analyze_tool_mark(roi)
-            if tool["is_striation"]:
-                analysis["tool"] = tool
-                ev_type = "impression_tool_mark"
-                subclass = f"TOOL MARK on {name}"
-                priority = 4
+        elif name_lower in ForensicConfig.DOCUMENTS:
+            ev_type = "trace_evidence"
+            subclass = f"DOCUMENT: {name}"
+            priority = 3
+            analysis = {"document": name}
+
+        elif name_lower in ForensicConfig.CLOTHING:
+            ev_type = "biological_blood"
+            subclass = f"CLOTHING: {name}"
+            priority = 3
+            bpa = self.bpa.analyze_pattern(self.bpa.detect_blood(roi), roi.size)
+            analysis = {"clothing": name, "blood_check": bpa}
+            if bpa["requires_forensic"]:
+                risks.append("Possible biological evidence")
+
+        else:
+            ev_type = "contextual"
+            subclass = f"OBJECT: {name}"
+            priority = 1
+            analysis = {"object": name}
 
         ev = self.evidence_manager.create_evidence(
             ev_type,
@@ -588,74 +640,111 @@ class ForensicSightSystem:
         )
         self.logged.add(ev.evidence_id)
 
-    def draw(self, frame: np.ndarray, results) -> np.ndarray:
+    def draw(self, frame, results):
         ann = frame.copy()
 
-        cv2.rectangle(ann, (0, 0), (ForensicConfig.WIDTH, 60), (0, 0, 0), -1)
+        cv2.rectangle(ann, (0, 0), (ForensicConfig.WIDTH, 65), (0, 0, 0), -1)
         status = "DEMO" if self.demo_mode else "LIVE"
         color = (255, 165, 0) if self.demo_mode else (0, 255, 0)
         cv2.putText(
             ann,
             f"FORENSIC SIGHT v2.0 [{status}] - {self.case_id}",
-            (10, 40),
+            (10, 45),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
+            0.8,
             color,
             2,
         )
 
-        try:
-            for box in results.boxes.data.cpu().numpy():
-                bbox = [int(box[0]), int(box[1]), int(box[2]), int(box[3])]
-                cls_id = int(box[5])
-                name = self.model.names[cls_id]
-
-                if name in ForensicConfig.PRIMARY:
-                    color = ForensicConfig.COLOR_PRIMARY
-                    label = f"EVIDENCE: {name} | PRIORITY: 5"
-                elif name in ForensicConfig.ZONES:
-                    color = ForensicConfig.COLOR_ZONE
-                    label = f"ZONE: {name}"
-                elif name in ForensicConfig.ANOMALIES:
-                    color = ForensicConfig.COLOR_ANOMALY
-                    label = f"ANOMALY: {name}"
-                else:
-                    continue
-
-                cv2.rectangle(ann, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
-                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-                cv2.rectangle(
-                    ann,
-                    (bbox[0], bbox[1] - th - 10),
-                    (bbox[0] + tw, bbox[1]),
-                    color,
-                    -1,
-                )
-                cv2.putText(
-                    ann,
-                    label,
-                    (bbox[0], bbox[1] - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 0, 0),
-                    2,
-                )
-
-                x1, y1, x2, y2 = bbox
-                rw = min(100, x2 - x1)
-                ry = min(y2 + 10, ForensicConfig.HEIGHT - 30)
-                if rw > 20:
-                    cv2.rectangle(
-                        ann, (x1, ry), (x1 + rw, ry + 15), (255, 255, 255), -1
+        if results.boxes is not None:
+            try:
+                for box in results.boxes.data.cpu().numpy():
+                    bbox = [int(box[0]), int(box[1]), int(box[2]), int(box[3])]
+                    cls_id = int(box[5])
+                    name = (
+                        self.model.names[cls_id]
+                        if cls_id < len(self.model.names)
+                        else "unknown"
                     )
-                    cv2.rectangle(ann, (x1, ry), (x1 + rw, ry + 15), (0, 0, 0), 1)
-                    for i in range(0, rw, 10):
-                        h = 5 if i % 20 == 0 else 3
-                        cv2.line(
-                            ann, (x1 + i, ry + 15), (x1 + i, ry + 15 - h), (0, 0, 0), 1
+                    name_lower = name.lower()
+
+                    if (
+                        name_lower in ForensicConfig.WEAPONS
+                        or "knife" in name_lower
+                        or "gun" in name_lower
+                    ):
+                        color = ForensicConfig.COLOR_WEAPON
+                        label = f"⚠️ WEAPON: {name} | PRIORITY: 5"
+                    elif (
+                        name_lower in ForensicConfig.BIOLOGICAL or "blood" in name_lower
+                    ):
+                        color = ForensicConfig.COLOR_BIOLOGICAL
+                        label = f"🩸 BIOLOGICAL: {name} | PRIORITY: 5"
+                    elif (
+                        name_lower in ForensicConfig.ELECTRONICS
+                        or "phone" in name_lower
+                        or "laptop" in name_lower
+                    ):
+                        color = ForensicConfig.COLOR_ELECTRONIC
+                        label = f"📱 {name} | DIGITAL EVIDENCE"
+                    elif name_lower in ForensicConfig.CONTAINERS or any(
+                        c in name_lower for c in ["bag", "box", "suitcase"]
+                    ):
+                        color = ForensicConfig.COLOR_CONTAINER
+                        label = f"📦 {name} | CHECK CONTENTS"
+                    elif (
+                        name_lower in ForensicConfig.FURNITURE
+                        or name_lower in ForensicConfig.KITCHEN
+                    ):
+                        color = ForensicConfig.COLOR_FURNITURE
+                        label = f"🪑 SEARCH ZONE: {name}"
+                    elif name_lower in ForensicConfig.TOOLS:
+                        color = ForensicConfig.COLOR_TOOL
+                        label = f"🔧 TOOL: {name}"
+                    else:
+                        color = ForensicConfig.COLOR_OTHER
+                        label = f"📍 {name}"
+
+                    cv2.rectangle(ann, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
+                    (tw, th), _ = cv2.getTextSize(
+                        label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2
+                    )
+                    cv2.rectangle(
+                        ann,
+                        (bbox[0], bbox[1] - th - 12),
+                        (bbox[0] + tw + 5, bbox[1]),
+                        color,
+                        -1,
+                    )
+                    cv2.putText(
+                        ann,
+                        label,
+                        (bbox[0], bbox[1] - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 0, 0),
+                        2,
+                    )
+
+                    bx, by, bw, bh = bbox
+                    rw = min(80, bw)
+                    ry = min(bh + 20, ForensicConfig.HEIGHT - 50)
+                    if rw > 15:
+                        cv2.rectangle(
+                            ann, (bx, ry), (bx + rw, ry + 12), (255, 255, 255), -1
                         )
-        except Exception as e:
-            pass
+                        cv2.rectangle(ann, (bx, ry), (bx + rw, ry + 12), (0, 0, 0), 1)
+                        for i in range(0, rw, 10):
+                            h = 5 if i % 20 == 0 else 3
+                            cv2.line(
+                                ann,
+                                (bx + i, ry + 12),
+                                (bx + i, ry + 12 - h),
+                                (0, 0, 0),
+                                1,
+                            )
+            except Exception as e:
+                pass
 
         bio = len(
             [
@@ -664,49 +753,34 @@ class ForensicSightSystem:
                 if "biological" in e.evidence_type
             ]
         )
-        trc = len(
+        trace = len(
             [
                 e
                 for e in self.evidence_manager.registered_evidence
                 if "trace" in e.evidence_type
             ]
         )
+        weapon = len(
+            [
+                e
+                for e in self.evidence_manager.registered_evidence
+                if "weapon" in e.evidence_type
+            ]
+        )
         cv2.putText(
             ann,
-            f"BIO: {bio} | TRACE: {trc} | TOTAL: {len(self.logged)}",
-            (10, ForensicConfig.HEIGHT - 20),
+            f"BIO: {bio} | TRACE: {trace} | WEAPON: {weapon} | TOT: {len(self.logged)}",
+            (10, ForensicConfig.HEIGHT - 15),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
             (255, 255, 255),
             2,
         )
 
-        zones = []
-        try:
-            for box in results.boxes.data.cpu().numpy():
-                name = self.model.names[int(box[5])]
-                if name in self.zone_prompts and name not in zones:
-                    zones.append(name)
-        except:
-            pass
-
-        yoff = 80
-        for z in zones[:3]:
-            cv2.putText(
-                ann,
-                self.zone_prompts.get(z, "")[:50],
-                (10, yoff),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 0, 0),
-                1,
-            )
-            yoff += 20
-
         cv2.putText(
             ann,
             f"FPS: {self.fps:.1f}",
-            (ForensicConfig.WIDTH - 120, 40),
+            (ForensicConfig.WIDTH - 120, 45),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
             (0, 255, 0),
@@ -720,21 +794,48 @@ class ForensicSightSystem:
         self.running = True
 
         if not self.demo_mode:
-            capture_t = threading.Thread(target=self._cap_worker, daemon=True)
-            inference_t = threading.Thread(target=self._inf_worker, daemon=True)
-            capture_t.start()
-            inference_t.start()
+            capture_q = queue.Queue(maxsize=2)
+            result_q = queue.Queue(maxsize=2)
+
+            def capture_worker():
+                while self.running:
+                    if self.cap and self.cap.isOpened():
+                        ret, f = self.cap.read()
+                        if ret:
+                            try:
+                                if capture_q.full():
+                                    capture_q.get_nowait()
+                                capture_q.put(f)
+                            except:
+                                pass
+                    time.sleep(0.01)
+
+            def inference_worker():
+                while self.running:
+                    try:
+                        f = capture_q.get(timeout=0.5)
+                        r = self.model(
+                            f,
+                            conf=ForensicConfig.CONF_THRESHOLD,
+                            iou=0.45,
+                            verbose=False,
+                        )
+                        if result_q.full():
+                            result_q.get_nowait()
+                        result_q.put((f, r[0]))
+                    except:
+                        pass
+
+            threading.Thread(target=capture_worker, daemon=True).start()
+            threading.Thread(target=inference_worker, daemon=True).start()
 
         last_time = time.time()
-        last_fps_update = last_time
-        frame_counter = 0
 
         while self.running:
             try:
                 now = time.time()
                 delta = now - last_time
                 last_time = now
-
                 if delta > 0:
                     self.fps = (
                         0.9 * self.fps + 0.1 * (1.0 / delta) if self.fps > 0 else 30.0
@@ -744,19 +845,20 @@ class ForensicSightSystem:
                     frame, results = self.gen_demo_frame()
                 else:
                     try:
-                        frame, results = self.result_queue.get(timeout=0.1)
+                        frame, results = result_q.get(timeout=0.2)
                     except:
                         continue
 
                 ann = self.draw(frame, results)
-                cv2.imshow("ForensicSight v2.0", ann)
                 self.current_frame = frame
+                cv2.imshow("ForensicSight v2.0", ann)
 
-                try:
-                    for box in results.boxes.data.cpu().numpy():
-                        self.process(frame, box)
-                except:
-                    pass
+                if results.boxes is not None:
+                    try:
+                        for box in results.boxes.data.cpu().numpy():
+                            self.process_detection(frame, box)
+                    except:
+                        pass
 
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):
@@ -765,48 +867,16 @@ class ForensicSightSystem:
                 elif key == ord("s"):
                     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                     cv2.imwrite(f"screenshot_{self.case_id}_{ts}.jpg", frame)
-                    logger.info("Screenshot saved")
                 elif key == ord("d"):
                     self.demo_mode = not self.demo_mode
-                    logger.info(f"Demo mode: {self.demo_mode}")
-
-                frame_counter += 1
-
             except Exception as e:
                 logger.error(f"Loop error: {e}")
                 time.sleep(0.05)
 
         self.cleanup()
 
-    def _cap_worker(self):
-        self.capture_queue = queue.Queue(maxsize=2)
-        while self.running:
-            if self.cap and self.cap.isOpened():
-                ret, f = self.cap.read()
-                if ret:
-                    try:
-                        if self.capture_queue.full():
-                            self.capture_queue.get_nowait()
-                        self.capture_queue.put(f)
-                    except:
-                        pass
-            time.sleep(0.01)
-
-    def _inf_worker(self):
-        self.result_queue = queue.Queue(maxsize=2)
-        while self.running:
-            try:
-                f = self.capture_queue.get(timeout=0.5)
-                r = self.model(f, conf=0.5, iou=0.45, verbose=False)
-                if self.result_queue.full():
-                    self.result_queue.get_nowait()
-                self.result_queue.put((f, r[0]))
-            except:
-                pass
-
     def start(self):
-        if not self.init_camera():
-            return False
+        self.init_camera()
         self.running = True
         self.main()
         return True
@@ -825,15 +895,15 @@ class ForensicSightSystem:
 def main():
     import sys
 
-    demo = "--demo" in sys.argv or "-d" in sys.argv
+    demo = "--demo" in sys.argv
     case_id = f"CASE-{datetime.now().strftime('%Y-%m-%d')}-001"
 
-    print("=" * 50)
-    print("  FORENSIC SIGHT v2.0")
-    print("  Press 'q' to quit, 's' for screenshot, 'd' for demo")
-    print("=" * 50)
+    print("=" * 60)
+    print("  FORENSIC SIGHT v2.0 - Enhanced Detection")
+    print("  Press 'q' to quit, 's' for screenshot, 'd' for demo mode")
+    print("=" * 60)
 
-    system = ForensicSightSystem(case_id, "s")
+    system = ForensicSightSystem(case_id)
     system.demo_mode = demo
 
     try:

@@ -1,0 +1,190 @@
+# Ransomware Protection Platform Configuration
+# AI-Driven Ransomware Protection for Hybrid Clouds
+
+app:
+  name: "Ransomware Protection Platform"
+  version: "1.0.0"
+  environment: "development"  # development, staging, production
+  debug: true
+  host: "0.0.0.0"
+  port: 8080
+  workers: 4
+  log_level: "INFO"
+
+# Database Configuration
+database:
+  postgres:
+    host: "localhost"
+    port: 5432
+    username: "ransomware_protect"
+    password: "${POSTGRES_PASSWORD}"
+    name: "ransomware_protection"
+    pool_size: 20
+    max_overflow: 40
+    echo: false
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+    password: "${REDIS_PASSWORD}"
+    decode_responses: true
+
+# Kafka Configuration
+kafka:
+  bootstrap_servers:
+    - "localhost:9092"
+  topics:
+    events: "ransomware.events"
+    alerts: "ransomware.alerts"
+    responses: "ransomware.responses"
+  consumer_group: "ransomware-protection"
+  auto_offset_reset: "latest"
+
+# Elasticsearch Configuration
+elasticsearch:
+  hosts:
+    - "http://localhost:9200"
+  index: "ransomware-logs"
+  session_id: "ransomware-protection"
+  bulk_size: 5000
+  flush_interval: 5
+
+# AI/ML Configuration
+ml:
+  model_path: "models/"
+  model_type: "ensemble"  # ensemble, transformer, xgboost
+  detection_threshold: 0.85
+  batch_size: 256
+  inference_timeout: 5.0
+  gpu_enabled: false
+  model_versions:
+    anomaly_detector: "v1.2.0"
+    behavior_analyzer: "v1.1.0"
+    signature_detector: "v1.0.0"
+
+# Security Configuration
+security:
+  encryption:
+    algorithm: "AES-256-GCM"
+    key_rotation_days: 90
+  jwt:
+    secret_key: "${JWT_SECRET_KEY}"
+    algorithm: "HS256"
+    access_token_expire_minutes: 30
+    refresh_token_expire_days: 7
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 100
+    burst_size: 20
+
+# Cloud Provider Configuration
+cloud_providers:
+  aws:
+    enabled: true
+    region: "ap-south-1"
+    access_key: "${AWS_ACCESS_KEY}"
+    secret_key: "${AWS_SECRET_KEY}"
+    iam_role: "ransomware-protection-role"
+  azure:
+    enabled: true
+    tenant_id: "${AZURE_TENANT_ID}"
+    client_id: "${AZURE_CLIENT_ID}"
+    client_secret: "${AZURE_CLIENT_SECRET}"
+    subscription_id: "${AZURE_SUBSCRIPTION_ID}"
+  gcp:
+    enabled: true
+    project_id: "${GCP_PROJECT_ID}"
+    credentials_path: "${GCP_CREDENTIALS_PATH}"
+
+# Detection Configuration
+detection:
+  scan_interval_seconds: 60
+  real_time_enabled: true
+  heuristics:
+    file_extension_risk:
+      - extension: ".encrypted"
+        risk_score: 1.0
+      - extension: ".locked"
+        risk_score: 0.9
+      - extension: ".ransom"
+        risk_score: 0.95
+      - extension: ".crypted"
+        risk_score: 0.85
+    process_behavior_risk:
+      - pattern: "mass_file_modification"
+        threshold: 100
+        time_window_seconds: 60
+        risk_score: 0.9
+      - pattern: "encryption_api_calls"
+        threshold: 50
+        time_window_seconds: 30
+        risk_score: 0.95
+      - pattern: "shadow_copy_deletion"
+        threshold: 1
+        time_window_seconds: 10
+        risk_score: 0.98
+
+# Response Configuration
+response:
+  auto_response_enabled: true
+  quarantine_enabled: true
+  backup_before_action: true
+  escalation_timeout_seconds: 300
+  actions:
+    - name: "quarantine_host"
+      enabled: true
+      priority: 1
+    - name: "isolate_network"
+      enabled: true
+      priority: 2
+    - name: "kill_process"
+      enabled: true
+      priority: 3
+    - name: "notify_admin"
+      enabled: true
+      priority: 4
+      always_run: true
+
+# Backup Configuration
+backup:
+  provider: "s3"  # s3, azure, gcp, local
+  schedule: "0 */4 * * *"  # Every 4 hours
+  retention_days: 30
+  compression: true
+  encryption: true
+
+# Monitoring Configuration
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090
+  health_check:
+    enabled: true
+    interval_seconds: 30
+  metrics:
+    enabled: true
+    export_interval_seconds: 15
+
+# Compliance Configuration
+compliance:
+  standards:
+    - "GDPR"
+    - "DPDPA"
+    - "ISO27001"
+    - "SOC2"
+  audit_log_retention_days: 365
+  data_retention_days: 90
+
+# Frontend Configuration
+frontend:
+  api_url: "http://localhost:8080"
+  refresh_interval: 5000
+  theme: "dark"
+  notifications: true
+
+# Agent Configuration
+agent:
+  heartbeat_interval: 30
+  event_batch_size: 100
+  max_queue_size: 10000
+  offline_buffer_size: 1000

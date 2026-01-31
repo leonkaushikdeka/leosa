@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assam Skill University - Issue Reporting Form</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            background-color: #f5f5f5;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .form-container {
+            background: white;
+            max-width: 800px;
+            width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .form-header {
+            background: #1a73e8;
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .form-header h1 {
+            font-size: 24px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .form-header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .form-content {
+            padding: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .form-group label span.required {
+            color: #d93025;
+            margin-left: 2px;
+        }
+
+        .form-group input[type="text"],
+        .form-group textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid #dadce0;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #333;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .form-group input[type="text"]:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #1a73e8;
+            box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1);
+        }
+
+        .form-group input::placeholder,
+        .form-group textarea::placeholder {
+            color: #9aa0a6;
+        }
+
+        .form-group textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 20px;
+        }
+
+        .form-row .form-group {
+            flex: 1;
+        }
+
+        @media (max-width: 600px) {
+            .form-row {
+                flex-direction: column;
+            }
+        }
+
+        .submit-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-top: 1px solid #e8eaed;
+        }
+
+        .submit-btn {
+            background: #1a73e8;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .submit-btn:hover {
+            background: #1557b0;
+        }
+
+        .page-number {
+            font-size: 14px;
+            color: #5f6368;
+        }
+
+        .success-message {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .success-message h2 {
+            color: #1e8e3e;
+            margin-bottom: 16px;
+        }
+
+        .success-message p {
+            color: #5f6368;
+        }
+    </style>
+</head>
+<body>
+    <div class="form-container">
+        <div class="form-header">
+            <h1>Assam Skill University - Issue Reporting Form</h1>
+            <p>Please fill out the form below to report any issues</p>
+        </div>
+
+        <form id="issueForm" class="form-content">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="floorNumber">Floor Number <span class="required">*</span></label>
+                    <input type="text" id="floorNumber" name="floorNumber" placeholder="e.g., 1st Floor, 2nd Floor" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="roomNumber">Room Number <span class="required">*</span></label>
+                    <input type="text" id="roomNumber" name="roomNumber" placeholder="e.g., Room 101, A-205" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="studentName">Name of Student <span class="required">*</span></label>
+                <input type="text" id="studentName" name="studentName" placeholder="Enter your full name" required>
+            </div>
+
+            <div class="form-group">
+                <label for="issues">Issues Faced <span class="required">*</span></label>
+                <textarea id="issues" name="issues" placeholder="Please describe the issues you are facing in detail..." required></textarea>
+            </div>
+        </form>
+
+        <div class="submit-section" id="submitSection">
+            <span class="page-number">Page 1 of 1</span>
+            <button type="submit" form="issueForm" class="submit-btn">Submit</button>
+        </div>
+
+        <div class="success-message" id="successMessage">
+            <h2>Thank you!</h2>
+            <p>Your issue has been submitted successfully. We will look into it shortly.</p>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('issueForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const formData = {
+                floorNumber: document.getElementById('floorNumber').value,
+                roomNumber: document.getElementById('roomNumber').value,
+                studentName: document.getElementById('studentName').value,
+                issues: document.getElementById('issues').value,
+                timestamp: new Date().toISOString()
+            };
+
+            console.log('Form submitted:', formData);
+
+            document.getElementById('issueForm').style.display = 'none';
+            document.getElementById('submitSection').style.display = 'none';
+            document.getElementById('successMessage').style.display = 'block';
+        });
+    </script>
+</body>
+</html>

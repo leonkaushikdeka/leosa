@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ransomware-protection-config
+  namespace: ransomware-protection
+data:
+  APP_NAME: "Ransomware Protection Platform"
+  APP_VERSION: "1.0.0"
+  APP_ENVIRONMENT: "production"
+  APP_DEBUG: "false"
+  APP_HOST: "0.0.0.0"
+  APP_PORT: "8080"
+  APP_WORKERS: "4"
+  APP_LOG_LEVEL: "INFO"
+
+  DATABASE_HOST: "ransomware-protection-postgres"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "ransomware_protection"
+  DATABASE_USERNAME: "ransomware_protect"
+
+  REDIS_HOST: "ransomware-protection-redis"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+
+  KAFKA_BOOTSTRAP_SERVERS: "ransomware-protection-kafka:9092"
+  KAFKA_TOPIC_EVENTS: "ransomware.events"
+  KAFKA_TOPIC_ALERTS: "ransomware.alerts"
+  KAFKA_TOPIC_RESPONSES: "ransomware.responses"
+
+  ELASTICSEARCH_HOSTS: "http://ransomware-protection-elasticsearch:9200"
+  ELASTICSEARCH_INDEX: "ransomware-logs"
+
+  ML_DETECTION_THRESHOLD: "0.85"
+  ML_MODEL_TYPE: "ensemble"
+
+  SECURITY_RATE_LIMITING_ENABLED: "true"
+  SECURITY_REQUESTS_PER_MINUTE: "100"
+  SECURITY_BURST_SIZE: "20"
+
+  MONITORING_PROMETHEUS_ENABLED: "true"
+  MONITORING_PROMETHEUS_PORT: "9090"
