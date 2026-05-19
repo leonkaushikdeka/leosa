@@ -252,6 +252,12 @@ SHA-256 Hash Computation:
 
 ---
 
+## Demo
+
+![Running locally](screenshots/demo.png)
+
+---
+
 ## 💻 Installation
 
 ### Prerequisites
